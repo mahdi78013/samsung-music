@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Play button (Rounded elegant right-pointing triangle) -->
+    <path
+        android:pathData="M 35,34 C 35,31.2 37.8,29.4 40.5,30.8 L 76.5,50.8 C 79.2,52.2 79.2,55.8 76.5,57.2 L 40.5,77.2 C 37.8,78.6 35,76.8 35,74 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="32"
+                android:startY="22"
+                android:endX="78"
+                android:endY="78"
+                android:type="linear">
+                <item android:offset="0" android:color="#FFB347"/>
+                <item android:offset="0.5" android:color="#FF4E50"/>
+                <item android:offset="1" android:color="#F9D423"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Stem and flag of the music note extending upwards -->
+    <path
+        android:pathData="M 52,48 L 56,54 V 22 c 5,0 12,3 15,10 c -3,-5 -9,-7 -15,-6 h -4 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="32"
+                android:startY="22"
+                android:endX="78"
+                android:endY="78"
+                android:type="linear">
+                <item android:offset="0" android:color="#FFB347"/>
+                <item android:offset="0.5" android:color="#FF4E50"/>
+                <item android:offset="1" android:color="#F9D423"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Circular cutout for the music note head -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 48,54 m -8,0 a 8,8 0 1,1 16,0 a 8,8 0 1,1 -16,0" />
+</vector>
