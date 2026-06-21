@@ -32,7 +32,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
 
     private var audioManager: AudioManager? = null
     private var focusRequest: android.media.AudioFocusRequest? = null
-    private var hasAudioFocus: Boolean = false  // ✅ اضافه شد
+    private var hasAudioFocus: Boolean = false
 
     private val becomingNoisyReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -45,7 +45,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         when (focusChange) {
             AudioManager.AUDIOFOCUS_LOSS -> {
-                hasAudioFocus = false  // ✅ اضافه شد
+                hasAudioFocus = false
                 MusicViewModel.instance?.let { vm ->
                     vm.wasPlayingBeforeFocusLoss = false
                     if (vm.uiState.value.isPlaying || vm.uiState.value.isBuffering) {
@@ -71,7 +71,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 }
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
-                hasAudioFocus = true  // ✅ اضافه شد
+                hasAudioFocus = true
                 MusicViewModel.instance?.let { vm ->
                     vm.setVolume(1.0f)
                     if (vm.wasPlayingBeforeFocusLoss) {
@@ -130,37 +130,21 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 override fun onPlay() {
                     MusicViewModel.instance?.resumePlayback()
                 }
-
                 override fun onPause() {
                     MusicViewModel.instance?.pausePlayback()
                 }
-
                 override fun onSkipToNext() {
                     MusicViewModel.instance?.skipNext()
                 }
-
                 override fun onSkipToPrevious() {
                     MusicViewModel.instance?.skipPrevious()
                 }
-
                 override fun onSeekTo(pos: Long) {
                     MusicViewModel.instance?.seekTo(pos)
                 }
             })
         }
         sessionToken = mediaSession.sessionToken
-
-        try {
-            val vmOnCreate = com.mahdi.musicpro.ui.MusicViewModel.instance
-            if (vmOnCreate != null) {
-                val state = vmOnCreate.uiState.value
-                if (state.currentTrack != null) {
-                    updatePlayback(state.currentTrack, state.isPlaying, vmOnCreate.progressMs.value)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("MusicPlaybackService", "Error during safe onCreate playback sync", e)
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -172,17 +156,9 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             }
         }
 
-        try {
-            val vmOnStart = com.mahdi.musicpro.ui.MusicViewModel.instance
-            if (vmOnStart != null) {
-                val state = vmOnStart.uiState.value
-                if (state.currentTrack != null) {
-                    updatePlayback(state.currentTrack, state.isPlaying, vmOnStart.progressMs.value)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("MusicPlaybackService", "Error during safe onStartCommand playback sync", e)
-        }
+        // ✅ حذف شد: updatePlayback خودکار در onStartCommand
+        // این باعث loop بود چون هر بار سرویس start میشد، updatePlayback صدا میزد
+        // که requestAudioFocus جدید میساخت و AUDIOFOCUS_LOSS ایجاد میکرد
 
         if (intent != null) {
             val action = intent.action
@@ -192,21 +168,11 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             }
             if (action != null) {
                 when (action) {
-                    ACTION_PLAY -> {
-                        MusicViewModel.instance?.resumePlayback()
-                    }
-                    ACTION_PAUSE -> {
-                        MusicViewModel.instance?.pausePlayback()
-                    }
-                    ACTION_PREVIOUS -> {
-                        MusicViewModel.instance?.skipPrevious()
-                    }
-                    ACTION_NEXT -> {
-                        MusicViewModel.instance?.skipNext()
-                    }
-                    ACTION_STOP -> {
-                        stopForegroundService()
-                    }
+                    ACTION_PLAY -> MusicViewModel.instance?.resumePlayback()
+                    ACTION_PAUSE -> MusicViewModel.instance?.pausePlayback()
+                    ACTION_PREVIOUS -> MusicViewModel.instance?.skipPrevious()
+                    ACTION_NEXT -> MusicViewModel.instance?.skipNext()
+                    ACTION_STOP -> stopForegroundService()
                     ACTION_DISMISS -> {
                         MusicViewModel.instance?.let { vm ->
                             if (vm.uiState.value.isPlaying || vm.uiState.value.isBuffering) {
@@ -250,7 +216,6 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     }
 
     private fun requestAudioFocus(): Boolean {
-        // ✅ اگه قبلاً focus داریم، دوباره request نکن
         if (hasAudioFocus) return true
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -264,7 +229,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 .setOnAudioFocusChangeListener(audioFocusChangeListener)
                 .build()
             val result = audioManager?.requestAudioFocus(focusRequest!!) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            hasAudioFocus = result  // ✅ اضافه شد
+            hasAudioFocus = result
             result
         } else {
             @Suppress("DEPRECATION")
@@ -273,13 +238,13 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 AudioManager.STREAM_MUSIC,
                 AudioManager.AUDIOFOCUS_GAIN
             ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            hasAudioFocus = result  // ✅ اضافه شد
+            hasAudioFocus = result
             result
         }
     }
 
     private fun abandonAudioFocus() {
-        hasAudioFocus = false  // ✅ اضافه شد
+        hasAudioFocus = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             focusRequest?.let { audioManager?.abandonAudioFocusRequest(it) }
         } else {
@@ -294,20 +259,14 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
 
         try {
             val cacheFile = java.io.File(cacheDir, "widget_art_cache.jpg")
-            if (cacheFile.exists()) {
-                cacheFile.delete()
-            }
+            if (cacheFile.exists()) cacheFile.delete()
         } catch (e: Exception) {}
 
         if (track == null) {
             com.mahdi.musicpro.widget.MusicProWidgetProvider.updateWidgetDirectly(
-                this,
-                getString(R.string.now_playing_no_track),
-                "",
-                false,
-                null
+                this, getString(R.string.now_playing_no_track), "", false, null
             )
-            abandonAudioFocus()  // ✅ اضافه شد
+            abandonAudioFocus()
             stopForegroundCompat(true)
             stopSelf()
             return
@@ -318,11 +277,8 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             val focusGained = requestAudioFocus()
             if (!focusGained) {
                 MusicViewModel.instance?.pausePlayback()
-                return  // ✅ اضافه شد - اگه focus نگرفتیم ادامه نده
+                return
             }
-        } else if (!isPlaying) {
-            // ✅ وقتی pause میشه focus رو نگه دار ولی hasAudioFocus رو reset نکن
-            // چون ممکنه کاربر دوباره play بزنه
         }
 
         val stateBuilder = PlaybackStateCompat.Builder()
@@ -336,17 +292,12 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             )
             .setState(
                 if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
-                progressMs,
-                1.0f
+                progressMs, 1.0f
             )
         mediaSession.setPlaybackState(stateBuilder.build())
 
         com.mahdi.musicpro.widget.MusicProWidgetProvider.updateWidgetDirectly(
-            this,
-            track.title,
-            track.artist,
-            isPlaying,
-            track.albumArtUri
+            this, track.title, track.artist, isPlaying, track.albumArtUri
         )
 
         lastUpdateJob?.cancel()
@@ -363,7 +314,8 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         mainNotificationManager.notify(NOTIFICATION_ID, initialNotification)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, initialNotification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            startForeground(NOTIFICATION_ID, initialNotification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         } else {
             startForeground(NOTIFICATION_ID, initialNotification)
         }
@@ -377,39 +329,26 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                         java.io.FileOutputStream(cacheFile).use { out ->
                             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
                         }
-                    } catch (e: Exception) {
-                        android.util.Log.e("MusicPlaybackService", "خطا در نوشتن کاور به کش فایل: ${e.message}", e)
-                    }
-                } else {
-                    try {
-                        if (cacheFile.exists()) {
-                            cacheFile.delete()
-                        }
                     } catch (e: Exception) {}
+                } else {
+                    try { if (cacheFile.exists()) cacheFile.delete() } catch (e: Exception) {}
                 }
                 bitmap
             }
-            if (artBitmap != null) {
-                if (currentTrack?.id == track.id) {
-                    val finalMetadataBuilder = MediaMetadataCompat.Builder()
-                        .putString(MediaMetadataCompat.METADATA_KEY_TITLE, track.title)
-                        .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, track.artist)
-                        .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, track.album)
-                        .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, track.durationMs)
-                        .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artBitmap)
-                    mediaSession.setMetadata(finalMetadataBuilder.build())
-
-                    val updatedNotification = buildMediaNotification(track, isPlaying, artBitmap)
-                    mainNotificationManager.notify(NOTIFICATION_ID, updatedNotification)
-                }
+            if (artBitmap != null && currentTrack?.id == track.id) {
+                val finalMetadataBuilder = MediaMetadataCompat.Builder()
+                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, track.title)
+                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, track.artist)
+                    .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, track.album)
+                    .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, track.durationMs)
+                    .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artBitmap)
+                mediaSession.setMetadata(finalMetadataBuilder.build())
+                val updatedNotification = buildMediaNotification(track, isPlaying, artBitmap)
+                mainNotificationManager.notify(NOTIFICATION_ID, updatedNotification)
             }
 
             com.mahdi.musicpro.widget.MusicProWidgetProvider.updateWidgetDirectly(
-                this@MusicPlaybackService,
-                track.title,
-                track.artist,
-                isPlaying,
-                null
+                this@MusicPlaybackService, track.title, track.artist, isPlaying, null
             )
         }
     }
@@ -429,9 +368,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                     bitmap
                 } else null
             }
-        } catch (e: Exception) {
-            null
-        }
+        } catch (e: Exception) { null }
     }
 
     private fun createDefaultAlbumArt(): Bitmap {
@@ -459,33 +396,29 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
 
     private fun buildMediaNotification(track: Track, isPlaying: Boolean, artBitmap: Bitmap?): android.app.Notification {
         createNotificationChannel()
-        val playPauseIntent = Intent(this, MusicPlaybackService::class.java).apply {
-            action = if (isPlaying) ACTION_PAUSE else ACTION_PLAY
-        }
         val playPausePendingIntent = android.app.PendingIntent.getService(
-            this, 1, playPauseIntent,
+            this, 1,
+            Intent(this, MusicPlaybackService::class.java).apply { action = if (isPlaying) ACTION_PAUSE else ACTION_PLAY },
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
-        val prevIntent = Intent(this, MusicPlaybackService::class.java).apply { action = ACTION_PREVIOUS }
         val prevPendingIntent = android.app.PendingIntent.getService(
-            this, 2, prevIntent,
+            this, 2,
+            Intent(this, MusicPlaybackService::class.java).apply { action = ACTION_PREVIOUS },
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
-        val nextIntent = Intent(this, MusicPlaybackService::class.java).apply { action = ACTION_NEXT }
         val nextPendingIntent = android.app.PendingIntent.getService(
-            this, 3, nextIntent,
+            this, 3,
+            Intent(this, MusicPlaybackService::class.java).apply { action = ACTION_NEXT },
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
-        val deleteIntent = Intent(this, MusicPlaybackService::class.java).apply { action = ACTION_DISMISS }
         val deletePendingIntent = android.app.PendingIntent.getService(
-            this, 4, deleteIntent,
+            this, 4,
+            Intent(this, MusicPlaybackService::class.java).apply { action = ACTION_DISMISS },
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
-        val openActivityIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
         val openActivityPendingIntent = android.app.PendingIntent.getActivity(
-            this, 0, openActivityIntent,
+            this, 0,
+            Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP },
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
         val finalArt = artBitmap ?: createDefaultAlbumArt()
@@ -516,16 +449,11 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                getString(R.string.app_name),
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
+            val channel = NotificationChannel(CHANNEL_ID, getString(R.string.app_name), NotificationManager.IMPORTANCE_LOW).apply {
                 description = getString(R.string.playback_control_desc)
                 setShowBadge(false)
             }
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
         }
     }
 
@@ -534,17 +462,13 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText("")
-            .setSilent(true)
-            .build()
+            .setContentText("").setSilent(true).build()
     }
 
     private fun stopForegroundService() {
         isPlaying = false
         abandonAudioFocus()
-        MusicViewModel.instance?.let { vm ->
-            vm.pausePlayback()
-        }
+        MusicViewModel.instance?.pausePlayback()
         stopForegroundCompat(true)
         stopSelf()
     }
@@ -579,41 +503,27 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
 
         if (currentTrack != null) {
             val description = android.support.v4.media.MediaDescriptionCompat.Builder()
-                .setMediaId(currentTrack.id.toString())
-                .setTitle(currentTrack.title)
-                .setSubtitle(currentTrack.artist)
-                .build()
+                .setMediaId(currentTrack.id.toString()).setTitle(currentTrack.title).setSubtitle(currentTrack.artist).build()
             mediaItems.add(MediaBrowserCompat.MediaItem(description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         } else if (queue.isNotEmpty()) {
             val first = queue.first()
             val description = android.support.v4.media.MediaDescriptionCompat.Builder()
-                .setMediaId(first.id.toString())
-                .setTitle(first.title)
-                .setSubtitle(first.artist)
-                .build()
+                .setMediaId(first.id.toString()).setTitle(first.title).setSubtitle(first.artist).build()
             mediaItems.add(MediaBrowserCompat.MediaItem(description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         } else {
             val description = android.support.v4.media.MediaDescriptionCompat.Builder()
-                .setMediaId("placeholder_track")
-                .setTitle("Music")
-                .setSubtitle("Play your favorite music")
-                .build()
+                .setMediaId("placeholder_track").setTitle("Music").setSubtitle("Play your favorite music").build()
             mediaItems.add(MediaBrowserCompat.MediaItem(description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         }
-
         result.sendResult(mediaItems)
     }
 
     override fun onDestroy() {
         abandonAudioFocus()
-        try {
-            unregisterReceiver(becomingNoisyReceiver)
-        } catch (e: Exception) {
+        try { unregisterReceiver(becomingNoisyReceiver) } catch (e: Exception) {
             Log.e("MusicPlaybackService", "Error unregistering becomingNoisyReceiver", e)
         }
-        MusicViewModel.instance?.let { vm ->
-            vm.saveQueueToPrefs()
-        }
+        MusicViewModel.instance?.saveQueueToPrefs()
         mediaSession.release()
         activeService = null
         com.mahdi.musicpro.ui.MusicViewModel.updateStrongReference()
@@ -636,41 +546,29 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         @Volatile
         var activeService: MusicPlaybackService? = null
 
-        fun isActive(): Boolean {
-            return activeService != null
-        }
+        fun isActive(): Boolean = activeService != null
 
         fun updateSessionPlaybackStateOnly(context: Context, isPlaying: Boolean, progressMs: Long) {
             val service = activeService ?: return
             val stateBuilder = PlaybackStateCompat.Builder()
                 .setActions(
-                    PlaybackStateCompat.ACTION_PLAY or
-                    PlaybackStateCompat.ACTION_PAUSE or
-                    PlaybackStateCompat.ACTION_PLAY_PAUSE or
-                    PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                    PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-                    PlaybackStateCompat.ACTION_SEEK_TO
+                    PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or
+                    PlaybackStateCompat.ACTION_PLAY_PAUSE or PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                    PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or PlaybackStateCompat.ACTION_SEEK_TO
                 )
                 .setState(
                     if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
-                    progressMs,
-                    1.0f
+                    progressMs, 1.0f
                 )
             service.mediaSession.setPlaybackState(stateBuilder.build())
         }
 
         fun updatePlaybackState(context: Context, track: Track?, isPlaying: Boolean, progressMs: Long) {
-            val service = activeService
-            if (service != null) {
-                service.updatePlayback(track, isPlaying, progressMs)
-            }
+            activeService?.updatePlayback(track, isPlaying, progressMs)
         }
 
         fun stopService(context: Context) {
-            val intent = Intent(context, MusicPlaybackService::class.java).apply {
-                action = ACTION_STOP
-            }
-            context.startService(intent)
+            context.startService(Intent(context, MusicPlaybackService::class.java).apply { action = ACTION_STOP })
         }
     }
 }
