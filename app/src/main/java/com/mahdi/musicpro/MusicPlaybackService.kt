@@ -32,6 +32,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
 
     private var audioManager: AudioManager? = null
     private var focusRequest: android.media.AudioFocusRequest? = null
+    private var hasAudioFocus: Boolean = false  // ✅ اضافه شد
 
     private val becomingNoisyReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -44,6 +45,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         when (focusChange) {
             AudioManager.AUDIOFOCUS_LOSS -> {
+                hasAudioFocus = false  // ✅ اضافه شد
                 MusicViewModel.instance?.let { vm ->
                     vm.wasPlayingBeforeFocusLoss = false
                     if (vm.uiState.value.isPlaying || vm.uiState.value.isBuffering) {
@@ -69,6 +71,7 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 }
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
+                hasAudioFocus = true  // ✅ اضافه شد
                 MusicViewModel.instance?.let { vm ->
                     vm.setVolume(1.0f)
                     if (vm.wasPlayingBeforeFocusLoss) {
@@ -88,7 +91,6 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         super.onCreate()
         activeService = this
 
-        // Start foreground immediately to prevent ForegroundServiceDidNotStartInTimeException
         createNotificationChannel()
         val tempNotification = buildTempNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -148,7 +150,6 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         }
         sessionToken = mediaSession.sessionToken
 
-        // Safely update initial playback state after mediaSession is fully initialized
         try {
             val vmOnCreate = com.mahdi.musicpro.ui.MusicViewModel.instance
             if (vmOnCreate != null) {
@@ -249,6 +250,9 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
     }
 
     private fun requestAudioFocus(): Boolean {
+        // ✅ اگه قبلاً focus داریم، دوباره request نکن
+        if (hasAudioFocus) return true
+
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val playbackAttributes = android.media.AudioAttributes.Builder()
                 .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
@@ -259,18 +263,23 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 .setAcceptsDelayedFocusGain(true)
                 .setOnAudioFocusChangeListener(audioFocusChangeListener)
                 .build()
-            audioManager?.requestAudioFocus(focusRequest!!) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            val result = audioManager?.requestAudioFocus(focusRequest!!) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            hasAudioFocus = result  // ✅ اضافه شد
+            result
         } else {
             @Suppress("DEPRECATION")
-            audioManager?.requestAudioFocus(
+            val result = audioManager?.requestAudioFocus(
                 audioFocusChangeListener,
                 AudioManager.STREAM_MUSIC,
                 AudioManager.AUDIOFOCUS_GAIN
             ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            hasAudioFocus = result  // ✅ اضافه شد
+            result
         }
     }
 
     private fun abandonAudioFocus() {
+        hasAudioFocus = false  // ✅ اضافه شد
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             focusRequest?.let { audioManager?.abandonAudioFocusRequest(it) }
         } else {
@@ -283,7 +292,6 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         this.currentTrack = track
         this.isPlaying = isPlaying
 
-        // Clean up or clear previous widget cached art so it doesn't leak or linger
         try {
             val cacheFile = java.io.File(cacheDir, "widget_art_cache.jpg")
             if (cacheFile.exists()) {
@@ -299,17 +307,22 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 false,
                 null
             )
-
+            abandonAudioFocus()  // ✅ اضافه شد
             stopForegroundCompat(true)
             stopSelf()
             return
         }
 
-        if (isPlaying) {
+        // ✅ فقط وقتی isPlaying=true و focus نداریم، request کن
+        if (isPlaying && !hasAudioFocus) {
             val focusGained = requestAudioFocus()
             if (!focusGained) {
                 MusicViewModel.instance?.pausePlayback()
+                return  // ✅ اضافه شد - اگه focus نگرفتیم ادامه نده
             }
+        } else if (!isPlaying) {
+            // ✅ وقتی pause میشه focus رو نگه دار ولی hasAudioFocus رو reset نکن
+            // چون ممکنه کاربر دوباره play بزنه
         }
 
         val stateBuilder = PlaybackStateCompat.Builder()
@@ -328,7 +341,6 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             )
         mediaSession.setPlaybackState(stateBuilder.build())
 
-        // Update home screen widget directly
         com.mahdi.musicpro.widget.MusicProWidgetProvider.updateWidgetDirectly(
             this,
             track.title,
@@ -337,10 +349,8 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             track.albumArtUri
         )
 
-        // Cancel previous loading job to avoid race conditions
         lastUpdateJob?.cancel()
 
-        // 1. Immediately post/show notification with NO artwork to keep startForeground happy & fast
         val initialMetadataBuilder = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, track.title)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, track.artist)
@@ -358,7 +368,6 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             startForeground(NOTIFICATION_ID, initialNotification)
         }
 
-        // 2. Load album art on IO Dispatcher, then update
         lastUpdateJob = serviceScope.launch {
             val artBitmap = withContext(Dispatchers.IO) {
                 val bitmap = getAlbumArtBitmap(track.albumArtUri)
@@ -381,7 +390,6 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 bitmap
             }
             if (artBitmap != null) {
-                // Ensure we are still showing the correct track
                 if (currentTrack?.id == track.id) {
                     val finalMetadataBuilder = MediaMetadataCompat.Builder()
                         .putString(MediaMetadataCompat.METADATA_KEY_TITLE, track.title)
@@ -396,7 +404,6 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                 }
             }
 
-            // Trigger direct update for widget so it now reads the newly populated cache file!
             com.mahdi.musicpro.widget.MusicProWidgetProvider.updateWidgetDirectly(
                 this@MusicPlaybackService,
                 track.title,
@@ -431,8 +438,6 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         val size = 512
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(bitmap)
-        
-        // Draw linear gradient background (pink-orange signature gradient)
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
         paint.shader = android.graphics.LinearGradient(
             0f, 0f, size.toFloat(), size.toFloat(),
@@ -441,8 +446,6 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             android.graphics.Shader.TileMode.CLAMP
         )
         canvas.drawRect(0f, 0f, size.toFloat(), size.toFloat(), paint)
-        
-        // Draw a music symbol (🎵 emoji) in the center
         val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.WHITE
             textSize = 180f
@@ -451,59 +454,41 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
         }
         val yPos = (canvas.height / 2f) - ((textPaint.descent() + textPaint.ascent()) / 2f)
         canvas.drawText("🎵", canvas.width / 2f, yPos, textPaint)
-        
         return bitmap
     }
 
     private fun buildMediaNotification(track: Track, isPlaying: Boolean, artBitmap: Bitmap?): android.app.Notification {
         createNotificationChannel()
- 
         val playPauseIntent = Intent(this, MusicPlaybackService::class.java).apply {
             action = if (isPlaying) ACTION_PAUSE else ACTION_PLAY
         }
         val playPausePendingIntent = android.app.PendingIntent.getService(
-            this,
-            1,
-            playPauseIntent,
+            this, 1, playPauseIntent,
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
- 
         val prevIntent = Intent(this, MusicPlaybackService::class.java).apply { action = ACTION_PREVIOUS }
         val prevPendingIntent = android.app.PendingIntent.getService(
-            this,
-            2,
-            prevIntent,
+            this, 2, prevIntent,
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
- 
         val nextIntent = Intent(this, MusicPlaybackService::class.java).apply { action = ACTION_NEXT }
         val nextPendingIntent = android.app.PendingIntent.getService(
-            this,
-            3,
-            nextIntent,
+            this, 3, nextIntent,
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
- 
         val deleteIntent = Intent(this, MusicPlaybackService::class.java).apply { action = ACTION_DISMISS }
         val deletePendingIntent = android.app.PendingIntent.getService(
-            this,
-            4,
-            deleteIntent,
+            this, 4, deleteIntent,
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
-
         val openActivityIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val openActivityPendingIntent = android.app.PendingIntent.getActivity(
-            this,
-            0,
-            openActivityIntent,
+            this, 0, openActivityIntent,
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
- 
         val finalArt = artBitmap ?: createDefaultAlbumArt()
-
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(track.title)
@@ -519,7 +504,6 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
                     .setMediaSession(mediaSession.sessionToken)
                     .setShowActionsInCompactView(0, 1, 2)
             )
- 
         builder.addAction(R.drawable.ic_prev_vector, "Previous", prevPendingIntent)
         if (isPlaying) {
             builder.addAction(R.drawable.ic_pause_vector, "Pause", playPausePendingIntent)
@@ -527,7 +511,6 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             builder.addAction(R.drawable.ic_play_vector, "Play", playPausePendingIntent)
         }
         builder.addAction(R.drawable.ic_next_vector, "Next", nextPendingIntent)
- 
         return builder.build()
     }
 
@@ -681,8 +664,6 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             if (service != null) {
                 service.updatePlayback(track, isPlaying, progressMs)
             }
-            // بخش else که startForegroundService داشت → کاملاً حذف شد
-            // سرویس فقط از togglePlayback/resumePlayback در ViewModel start بشه
         }
 
         fun stopService(context: Context) {
